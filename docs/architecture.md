@@ -1,0 +1,59 @@
+# DOMAIN.etn architecture
+
+DOMAIN.etn is the **product and commerce** backend for `.etn` names.
+
+EAE is an **external intelligence** dependency. Official Electroneum ENS
+contracts are the **registration source of truth**.
+
+This service:
+
+- answers availability from `ETHRegistrarController.available`
+- quotes native ETN rent from `rentPrice`
+- prepares unsigned `commit` then `register` calldata
+- tracks intent state (`prepared` → `submitted` → `confirmed`/`failed`)
+- may display EAE facts after the chain event exists
+
+This service does **not**:
+
+- hold private keys
+- custody ETN
+- broadcast transactions
+- treat prepare/submit as success
+- trust client-supplied prices or contract addresses
+- execute arbitrary calldata
+- implement secondary marketplace settlement
+- register names through EAE
+
+## API (v1)
+
+- `GET /health`
+- `GET /ready`
+- `GET /api/v1/contract`
+- `GET /api/v1/domains/availability?name=`
+- `GET /api/v1/domains/quote?name=&duration=`
+- `POST /api/v1/registration/prepare-commit`
+- `POST /api/v1/registration/prepare-register`
+- `GET /api/v1/registration/{intent_id}`
+- `POST /api/v1/registration/{intent_id}/submitted`
+- `POST /api/v1/registration/{intent_id}/confirm` (read receipt only)
+- `GET /api/v1/owners/{address}/domains` (EAE facts, not local authority)
+- `GET /api/v1/marketplace` (`not_implemented`)
+
+Frontend contract:
+
+SEARCH → availability → quote → prepare commit → wallet signs → wait 60s →
+prepare register → wallet signs and pays ETN → confirm NameRegistered →
+EAE indexes the fact.
+
+A prepared or submitted intent is **not** success. Confirm reads the receipt
+and requires a `NameRegistered` log on the live controller whose indexed
+labelhash and owner match the intent. A log for a different name, or a
+different owner of the same name, is not confirmation.
+
+## Layers
+
+- On-chain facts: owner, expiry, NameRegistered, receipt
+- Transaction intent: name, duration, registrant, quoted price, calldata
+- Transaction state: prepared / wallet_signing / submitted / confirmed / failed / stale / expired
+
+
