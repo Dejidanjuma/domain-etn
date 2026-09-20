@@ -12,6 +12,11 @@ from eth_utils import to_checksum_address
 
 CHAIN_ID = 52014
 CHAIN_NAME = "electroneum"
+CHAIN_DISPLAY_NAME = "Electroneum Mainnet"
+EXPLORER_URL = "https://blockexplorer.electroneum.com"
+PUBLIC_RPC_URL = "https://rpc.electroneum.com"
+NATIVE_SYMBOL = "ETN"
+NATIVE_DECIMALS = 18
 
 # Live ETHRegistrarController — only canonical registration target.
 CONTROLLER = to_checksum_address("0x3CFa6D6E7e1216393C2cb9393Bc0f411492E33e9")

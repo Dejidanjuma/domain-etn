@@ -31,8 +31,10 @@ intelligence commerce UX
 7. Primary registration and secondary marketplace are different flows.
 8. After on-chain success, EAE may index the resulting fact. DOMAIN.etn
    may then display it. DOMAIN.etn never becomes a second ownership table.
-9. Future listings, Buy Now, offers, auctions, CLUB mechanisms, renewals,
-   and primary-name UX must preserve this split.
+9. Future listings, Buy Now, offers, auctions, CLUB mechanisms,
+   and primary-name UX must preserve this split. Renewal is a
+   prepare-only DOMAIN.etn flow against the official controller,
+   not an EAE job.
 
 ## Consequences
 Registration APIs live in this repository. EAE is not modified to execute

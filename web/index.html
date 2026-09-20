@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DOMAIN.etn — Find your .etn name</title>
+    <meta name="description" content="Register a .etn name on Electroneum. You sign. Official ENS contracts register. DOMAIN.etn never holds your keys or ETN." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Figtree:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/static/css/app.css" />
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to search</a>
+    <header class="top">
+      <a class="brand" href="/" data-link>/</a>
+      <nav class="top-nav" aria-label="Primary">
+        <a href="/" data-link>Search</a>
+        <a href="/me" data-link>My names</a>
+      </nav>
+      <div class="top-actions">
+        <p class="net-pill" id="net-pill" hidden></p>
+        <button type="button" class="btn ghost" id="wallet-btn">Connect wallet</button>
+      </div>
+    </header>
+    <main id="main">
+      <section class="hero">
+        <p class="kicker">Electroneum names</p>
+        <h1>Find your <span class="tld">.etn</span> name</h1>
+        <p class="lede">Search a name, see the live price, then register it with your own wallet.</p>
+        <form class="search" action="/d/satoshi.etn" method="get">
+          <label class="sr-only" for="q">Search a .etn domain</label>
+          <input id="q" name="q" placeholder="satoshi.etn" autocomplete="off" spellcheck="false" />
+          <button class="btn" type="submit">Search</button>
+        </form>
+      </section>
+    </main>
+    <footer class="foot">
+      <p>DOMAIN.etn prepares the transaction. Your wallet signs and pays native ETN to the official Electroneum registrar. We never hold keys or custody funds.</p>
+      <p class="muted">Not a marketplace. Not EAE. Chain 52014.</p>
+    </footer>
+    <div id="live" class="sr-only" aria-live="polite"></div>
+    <script type="module" src="/static/js/app.js"></script>
+  </body>
+</html>

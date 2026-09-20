@@ -20,7 +20,9 @@ AVAILABLE_SIG = "available(string)"
 VALID_SIG = "valid(string)"
 RENT_PRICE_SIG = "rentPrice(string,uint256)"
 COMMITMENTS_SIG = "commitments(bytes32)"
-CHAIN_ID_SIG = "eth_chainId"
+RENEW_SIG = "renew(string,uint256,bytes32)"
+OWNER_OF_SIG = "ownerOf(uint256)"
+NAME_EXPIRES_SIG = "nameExpires(uint256)"
 
 SEL_COMMIT = function_signature_to_4byte_selector(COMMIT_SIG)
 SEL_REGISTER = function_signature_to_4byte_selector(REGISTER_SIG)
@@ -29,13 +31,25 @@ SEL_AVAILABLE = function_signature_to_4byte_selector(AVAILABLE_SIG)
 SEL_VALID = function_signature_to_4byte_selector(VALID_SIG)
 SEL_RENT_PRICE = function_signature_to_4byte_selector(RENT_PRICE_SIG)
 SEL_COMMITMENTS = function_signature_to_4byte_selector(COMMITMENTS_SIG)
+SEL_RENEW = function_signature_to_4byte_selector(RENEW_SIG)
+SEL_OWNER_OF = function_signature_to_4byte_selector(OWNER_OF_SIG)
+SEL_NAME_EXPIRES = function_signature_to_4byte_selector(NAME_EXPIRES_SIG)
 
-# Live-verified 2026-09-19
+# Live-verified 2026-09-19 (commit/register) and ABI-verified 2026-09-20 (renew/owner/expiry)
 assert SEL_AVAILABLE.hex() == "aeb8ce9b"
 assert SEL_RENT_PRICE.hex() == "83e7f6ff"
 assert SEL_COMMIT.hex() == "f14fcbc8"
 assert SEL_REGISTER.hex() == "ef9c8805"
 assert SEL_MAKE_COMMITMENT.hex() == "cf7d6e01"
+assert SEL_RENEW.hex() == "18026ad1"
+assert SEL_OWNER_OF.hex() == "6352211e"
+assert SEL_NAME_EXPIRES.hex() == "d6e4fa86"
+assert SEL_COMMITMENTS.hex() == "839df945"
+
+NAME_REGISTERED_TOPIC0 = "0x" + keccak(
+    b"NameRegistered(string,bytes32,address,uint256,uint256,uint256,bytes32)"
+).hex()
+NAME_RENEWED_TOPIC0 = "0x" + keccak(b"NameRenewed(string,bytes32,uint256,uint256,bytes32)").hex()
 
 
 def _addr(value: str) -> str:
@@ -66,6 +80,15 @@ def _referrer(raw: str | None) -> bytes:
         return bytes.fromhex(text)
     except ValueError as exc:
         raise ProductError("invalid_referrer", "referrer must be bytes32 hex.") from exc
+
+
+def labelhash_hex(label: str) -> str:
+    """ENS labelhash: keccak256(bytes(label))."""
+    return "0x" + keccak(text=label).hex()
+
+
+def token_id(label: str) -> int:
+    return int(labelhash_hex(label), 16)
 
 
 def registration_tuple(
@@ -118,6 +141,14 @@ def call_commitments(commitment: str) -> str:
     return "0x" + SEL_COMMITMENTS.hex() + encode(["bytes32"], [bytes.fromhex(raw)]).hex()
 
 
+def call_owner_of(token: int) -> str:
+    return "0x" + SEL_OWNER_OF.hex() + encode(["uint256"], [int(token)]).hex()
+
+
+def call_name_expires(token: int) -> str:
+    return "0x" + SEL_NAME_EXPIRES.hex() + encode(["uint256"], [int(token)]).hex()
+
+
 def tx_commit(commitment: str) -> dict:
     raw = commitment[2:] if commitment.startswith("0x") else commitment
     data = "0x" + SEL_COMMIT.hex() + encode(["bytes32"], [bytes.fromhex(raw)]).hex()
@@ -131,6 +162,20 @@ def tx_commit(commitment: str) -> dict:
 
 def tx_register(reg: tuple, value_wei: int) -> dict:
     data = "0x" + SEL_REGISTER.hex() + encode_registration(reg).hex()
+    return {
+        "to": CONTROLLER,
+        "value": str(int(value_wei)),
+        "data": data,
+        "chain_id": 52014,
+    }
+
+
+def tx_renew(label: str, duration: int, value_wei: int, referrer: str | None = None) -> dict:
+    data = (
+        "0x"
+        + SEL_RENEW.hex()
+        + encode(["string", "uint256", "bytes32"], [label, int(duration), _referrer(referrer)]).hex()
+    )
     return {
         "to": CONTROLLER,
         "value": str(int(value_wei)),

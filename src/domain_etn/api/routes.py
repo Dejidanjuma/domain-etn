@@ -5,30 +5,45 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 
 from src.domain_etn import PRODUCT, __version__
-from src.domain_etn.eae.client import refuse_registration_via_eae
+from src.domain_etn.domains.profile import DomainProfile
+from src.domain_etn.eae.client import normalize_owner_domains, refuse_registration_via_eae
 from src.domain_etn.ens.addresses import (
     BASE_REGISTRAR,
     CHAIN_ID,
+    CHAIN_DISPLAY_NAME,
     CONTROLLER,
     DEFAULT_REVERSE_REGISTRAR,
+    EXPLORER_URL,
     GRACE_PERIOD_SEC,
     MAX_COMMITMENT_AGE_SEC,
     MIN_COMMITMENT_AGE_SEC,
     MIN_REGISTRATION_DURATION_SEC,
     NAME_WRAPPER,
+    NATIVE_DECIMALS,
+    NATIVE_SYMBOL,
     PUBLIC_RESOLVER,
+    PUBLIC_RPC_URL,
     REGISTRY,
     REVERSE_REGISTRAR,
     UNUSED_CONTROLLER,
 )
 from src.domain_etn.marketplace.boundary import NOT_IMPLEMENTED as MARKETPLACE
 from src.domain_etn.registration.service import RegistrationService
+from src.domain_etn.renewal.service import RenewalService
 
 router = APIRouter()
 
 
 def _svc(request: Request) -> RegistrationService:
     return request.app.state.registration
+
+
+def _renew(request: Request) -> RenewalService:
+    return request.app.state.renewal
+
+
+def _profile(request: Request) -> DomainProfile:
+    return request.app.state.profile
 
 
 @router.get("/health")
@@ -64,7 +79,16 @@ def contract():
         "source_of_truth": "official_electroneum_ens_contracts",
         "flows": {
             "primary_registration": "implemented_prepare_only",
+            "renewal": "implemented_prepare_only",
             "secondary_marketplace": "not_implemented",
+        },
+        "chain": {
+            "chain_id": CHAIN_ID,
+            "name": CHAIN_DISPLAY_NAME,
+            "native_symbol": NATIVE_SYMBOL,
+            "native_decimals": NATIVE_DECIMALS,
+            "explorer": EXPLORER_URL,
+            "public_rpc": PUBLIC_RPC_URL,
         },
         "chain_id": CHAIN_ID,
         "contracts": {
@@ -87,6 +111,14 @@ def contract():
             "payment": "native_ETN",
             "approvals_required": False,
         },
+        "renewal": {
+            "method": "renew(string,uint256,bytes32)",
+            "selector": "18026ad1",
+            "payment": "native_ETN",
+            "charged": "rentPrice.base",
+            "commit_reveal": False,
+            "anyone_may_pay": True,
+        },
         "ai_interpretation": "not_implemented",
     }
 
@@ -99,6 +131,11 @@ def availability(request: Request, name: str):
 @router.get("/api/v1/domains/quote")
 def quote(request: Request, name: str, duration: int):
     return _svc(request).quote(name, duration)
+
+
+@router.get("/api/v1/domains/profile")
+def domain_profile(request: Request, name: str):
+    return _profile(request).get(name)
 
 
 @router.post("/api/v1/registration/prepare-commit")
@@ -120,6 +157,11 @@ def get_intent(request: Request, intent_id: str):
     return _svc(request).get(intent_id)
 
 
+@router.get("/api/v1/registration/{intent_id}/commitment")
+def commitment_status(request: Request, intent_id: str):
+    return _svc(request).commitment_status(intent_id)
+
+
 @router.post("/api/v1/registration/{intent_id}/submitted")
 async def submitted(request: Request, intent_id: str):
     body = await request.json()
@@ -131,19 +173,56 @@ def confirm(request: Request, intent_id: str):
     return _svc(request).confirm(intent_id)
 
 
+@router.get("/api/v1/renewal/quote")
+def renewal_quote(request: Request, name: str, duration: int):
+    return _renew(request).quote(name, duration)
+
+
+@router.post("/api/v1/renewal/prepare")
+async def renewal_prepare(request: Request):
+    body = await request.json()
+    refuse_registration_via_eae(body)
+    return _renew(request).prepare(body)
+
+
+@router.get("/api/v1/renewal/{intent_id}")
+def get_renewal(request: Request, intent_id: str):
+    return _renew(request).get(intent_id)
+
+
+@router.post("/api/v1/renewal/{intent_id}/submitted")
+async def renewal_submitted(request: Request, intent_id: str):
+    body = await request.json()
+    return _renew(request).mark_submitted(intent_id, body.get("tx_hash") or "")
+
+
+@router.post("/api/v1/renewal/{intent_id}/confirm")
+def renewal_confirm(request: Request, intent_id: str):
+    return _renew(request).confirm(intent_id)
+
+
 @router.get("/api/v1/owners/{address}/domains")
 def owner_domains(request: Request, address: str):
     eae = request.app.state.eae
-    facts = eae.investigate(address) if eae.enabled() else None
+    facts = None
+    if eae.enabled():
+        owner_fn = getattr(eae, "owner_domains", None)
+        if callable(owner_fn):
+            facts = owner_fn(address)
+        if facts is None and hasattr(eae, "investigate"):
+            facts = eae.investigate(address)
+    domains = normalize_owner_domains(address, facts)
     return {
         "type": "user_domains",
         "address": address,
         "authority": "eae_indexed_facts" if facts is not None else "not_queried",
         "not_ownership_source": True,
+        "domains": domains,
         "eae": facts,
         "note": (
             "DOMAIN.etn does not keep a local ownership table. "
-            "Indexed facts come from EAE after the chain event exists."
+            "Indexed facts come from EAE after the chain event exists. "
+            "Search a name for a live on-chain profile."
         ),
     }
 

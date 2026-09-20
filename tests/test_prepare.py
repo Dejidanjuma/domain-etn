@@ -5,7 +5,7 @@ from __future__ import annotations
 import unittest
 
 from src.domain_etn.ens.addresses import CONTROLLER, UNUSED_CONTROLLER
-from tests.helpers import ALICE, REGISTRANT, SECRET, YEAR, make_client
+from tests.helpers import ALICE, REGISTRANT, SECRET, YEAR, make_client, mature_commitment
 
 
 class PrepareTests(unittest.TestCase):
@@ -47,6 +47,7 @@ class PrepareTests(unittest.TestCase):
                 "secret": SECRET,
             }
         )
+        mature_commitment(self.rpc, commit["commitment"])
         res = self.client.post(
             "/api/v1/registration/prepare-register",
             json={"intent_id": commit["intent_id"], "secret": SECRET},
@@ -58,6 +59,23 @@ class PrepareTests(unittest.TestCase):
         self.assertEqual(body["register_tx"]["value"], str(10**18))
         self.assertTrue(body["register_tx"]["data"].startswith("0xef9c8805"))
         self.assertFalse(body["success"])
+
+    def test_immature_commitment_is_refused(self):
+        quote = self._quote()
+        commit = self.service.prepare_commit(
+            {
+                "name": ALICE,
+                "quote_token": quote["quote_token"],
+                "registrant": REGISTRANT,
+                "secret": SECRET,
+            }
+        )
+        res = self.client.post(
+            "/api/v1/registration/prepare-register",
+            json={"intent_id": commit["intent_id"], "secret": SECRET},
+        )
+        self.assertEqual(res.status_code, 400)
+        self.assertIn(res.json()["error"], {"commitment_not_found", "commitment_not_mature"})
 
     def test_wrong_secret_rejected(self):
         quote = self._quote()
@@ -107,7 +125,6 @@ class PrepareTests(unittest.TestCase):
 
     def test_client_price_is_not_trusted(self):
         quote = self._quote()
-        # Body may include a fake price; backend re-reads rentPrice.
         res = self.client.post(
             "/api/v1/registration/prepare-commit",
             json={

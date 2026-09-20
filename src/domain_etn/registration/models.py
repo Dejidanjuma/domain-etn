@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 STATUS_PREPARED = "prepared"
@@ -14,6 +14,7 @@ STATUS_STALE = "stale"
 STATUS_EXPIRED = "expired"
 
 FLOW_PRIMARY = "primary_registration"
+FLOW_RENEWAL = "renewal"
 FLOW_MARKETPLACE = "secondary_marketplace"
 
 
@@ -79,12 +80,64 @@ class RegistrationIntent:
         }
 
 
+@dataclass
+class RenewalIntent:
+    intent_id: str
+    status: str
+    flow: str = FLOW_RENEWAL
+    name: str = ""
+    label: str = ""
+    payer: str = ""
+    duration: int = 0
+    controller: str = ""
+    chain_id: int = 52014
+    quote_id: str = ""
+    price_base: str = "0"
+    price_premium: str = "0"
+    price_total: str = "0"
+    renew_tx: dict | None = None
+    tx_hash: str | None = None
+    created_at: int = 0
+    expires_at: int = 0
+    note: str = ""
+
+    def public(self) -> dict[str, Any]:
+        return {
+            "type": "renewal_intent",
+            "intent_id": self.intent_id,
+            "status": self.status,
+            "flow": self.flow,
+            "name": self.name,
+            "label": self.label,
+            "payer": self.payer,
+            "duration": self.duration,
+            "chain_id": self.chain_id,
+            "controller": self.controller,
+            "quote_id": self.quote_id,
+            "price": {
+                "base": self.price_base,
+                "premium": self.price_premium,
+                "total": self.price_total,
+                "currency": "ETN",
+                "unit": "wei",
+                "charged": "base",
+            },
+            "renew_tx": self.renew_tx,
+            "tx_hash": self.tx_hash,
+            "created_at": self.created_at,
+            "expires_at": self.expires_at,
+            "success": self.status == STATUS_CONFIRMED,
+            "note": self.note
+            or "Prepared/signed/submitted is not renewal success. Only a confirmed NameRenewed log is.",
+        }
+
+
 class IntentStore:
     def __init__(self) -> None:
-        self._items: dict[str, RegistrationIntent] = {}
+        self._items: dict[str, Any] = {}
 
-    def put(self, intent: RegistrationIntent) -> None:
+    def put(self, intent) -> None:
         self._items[intent.intent_id] = intent
 
-    def get(self, intent_id: str) -> RegistrationIntent | None:
+    def get(self, intent_id: str):
         return self._items.get(intent_id)

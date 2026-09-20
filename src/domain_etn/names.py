@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 
+from src.domain_etn.ens.addresses import MIN_REGISTRATION_DURATION_SEC
 from src.domain_etn.errors import ProductError
 
 TLD = "etn"
@@ -55,3 +56,17 @@ def parse_registration_name(raw: str) -> dict:
         "tld": TLD,
         "normalized": f"{label}.{TLD}",
     }
+
+
+def require_duration(duration) -> int:
+    try:
+        value = int(duration)
+    except (TypeError, ValueError) as exc:
+        raise ProductError("invalid_duration", "duration must be an integer number of seconds.") from exc
+    if value < MIN_REGISTRATION_DURATION_SEC:
+        raise ProductError(
+            "invalid_duration",
+            f"duration must be >= {MIN_REGISTRATION_DURATION_SEC} seconds (28 days).",
+            {"min": MIN_REGISTRATION_DURATION_SEC},
+        )
+    return value

@@ -5,22 +5,28 @@ from __future__ import annotations
 import time
 import uuid
 
-from eth_utils import keccak as _keccak
-
 from src.domain_etn.config import Settings, settings as default_settings
 from src.domain_etn.ens.addresses import (
     CHAIN_ID,
     CONTROLLER,
-    MIN_REGISTRATION_DURATION_SEC,
+    MAX_COMMITMENT_AGE_SEC,
+    MIN_COMMITMENT_AGE_SEC,
     PUBLIC_RESOLVER,
     REVERSE_RECORD_ETHEREUM_BIT,
     UNUSED_CONTROLLER,
     ZERO,
 )
 from src.domain_etn.ens.client import EnsReader, checksum_wallet
-from src.domain_etn.ens.encoding import commitment_hash, registration_tuple, tx_commit, tx_register
+from src.domain_etn.ens.encoding import (
+    NAME_REGISTERED_TOPIC0,
+    commitment_hash,
+    labelhash_hex,
+    registration_tuple,
+    tx_commit,
+    tx_register,
+)
 from src.domain_etn.errors import ProductError
-from src.domain_etn.names import parse_registration_name
+from src.domain_etn.names import parse_registration_name, require_duration
 from src.domain_etn.registration.models import (
     FLOW_PRIMARY,
     STATUS_CONFIRMED,
@@ -35,12 +41,6 @@ from src.domain_etn.registration.models import (
 )
 from src.domain_etn.rpc import Rpc
 from src.domain_etn.tokens import sign_payload, verify_token
-
-# Live controller ABI: NameRegistered(string,bytes32,address,uint256,uint256,uint256,bytes32)
-# Indexed: labelhash (topic1), owner (topic2). referrer is NOT indexed.
-NAME_REGISTERED_TOPIC0 = "0x" + _keccak(
-    b"NameRegistered(string,bytes32,address,uint256,uint256,uint256,bytes32)"
-).hex()
 
 
 class RegistrationService:
@@ -71,7 +71,7 @@ class RegistrationService:
 
     def quote(self, name: str, duration: int, *, now: int | None = None) -> dict:
         parsed = parse_registration_name(name)
-        duration = _require_duration(duration)
+        duration = require_duration(duration)
         avail = self.ens.available(parsed["label"])
         if not avail:
             raise ProductError(
@@ -122,13 +122,13 @@ class RegistrationService:
         _reject_client_contract(body)
         parsed = parse_registration_name(body.get("name") or "")
         quote = verify_token(str(body.get("quote_token") or ""), self.settings.quote_secret, now=now)
-        requested_duration = int(body.get("duration") or quote["duration"])
-        if quote.get("label") != parsed["label"]:
-            raise ProductError("invalid_quote", "Name does not match the quote.")
-        if requested_duration != int(quote["duration"]):
-            raise ProductError("invalid_quote", "Duration does not match the quote.")
+        if quote.get("label") != parsed["label"] or int(quote.get("duration") or 0) != int(body.get("duration") or quote["duration"]):
+            if int(body.get("duration") or quote["duration"]) != int(quote["duration"]):
+                raise ProductError("invalid_quote", "Duration does not match the quote.")
+            if quote.get("label") != parsed["label"]:
+                raise ProductError("invalid_quote", "Name does not match the quote.")
         duration = int(quote["duration"])
-        _require_duration(duration)
+        require_duration(duration)
         registrant = checksum_wallet(body.get("registrant") or "")
         secret = str(body.get("secret") or "")
         resolver, reverse = _resolver_and_reverse(body)
@@ -178,8 +178,8 @@ class RegistrationService:
         self.store.put(intent)
         doc = intent.public()
         doc["client_phase"] = STATUS_WALLET_SIGNING
-        doc["min_commitment_age_sec"] = 60
-        doc["max_commitment_age_sec"] = 86400
+        doc["min_commitment_age_sec"] = MIN_COMMITMENT_AGE_SEC
+        doc["max_commitment_age_sec"] = MAX_COMMITMENT_AGE_SEC
         return doc
 
     def prepare_register(self, body: dict, *, now: int | None = None) -> dict:
@@ -203,6 +203,22 @@ class RegistrationService:
         )
         if commitment_hash(reg) != intent.commitment:
             raise ProductError("invalid_secret", "secret does not match the prepared commitment.")
+        age = self.commitment_status(intent.intent_id, now=ts)
+        if not age.get("committed"):
+            raise ProductError(
+                "commitment_not_found",
+                "Commitment is not on chain yet. Wait for the commit transaction to be mined.",
+                {"commitment": intent.commitment},
+            )
+        if not age.get("ready"):
+            raise ProductError(
+                "commitment_not_mature",
+                "Commitment is too new. Wait until minCommitmentAge has passed.",
+                {"ready_at": age.get("ready_at"), "seconds_remaining": age.get("seconds_remaining")},
+            )
+        if age.get("expired"):
+            intent.status = STATUS_EXPIRED
+            raise ProductError("expired_intent", "Commitment is older than maxCommitmentAge.")
         if not self.ens.available(intent.label):
             intent.status = STATUS_STALE
             raise ProductError("unavailable_domain", "Name is no longer available.")
@@ -281,25 +297,38 @@ class RegistrationService:
     def get(self, intent_id: str) -> dict:
         return self._require_intent(intent_id).public()
 
+    def commitment_status(self, intent_id: str, *, now: int | None = None) -> dict:
+        intent = self._require_intent(intent_id)
+        ts = int(now if now is not None else time.time())
+        committed_at = int(self.ens.commitment_timestamp(intent.commitment) or 0)
+        ready_at = committed_at + MIN_COMMITMENT_AGE_SEC if committed_at else None
+        expires_at = committed_at + MAX_COMMITMENT_AGE_SEC if committed_at else None
+        committed = committed_at > 0
+        ready = bool(committed and ts >= ready_at and ts < expires_at)
+        expired = bool(committed and ts >= expires_at)
+        remaining = max(0, (ready_at or 0) - ts) if committed and not ready and not expired else 0
+        return {
+            "type": "commitment_status",
+            "intent_id": intent.intent_id,
+            "commitment": intent.commitment,
+            "committed": committed,
+            "committed_at": committed_at or None,
+            "ready": ready,
+            "expired": expired,
+            "ready_at": ready_at,
+            "commitment_expires_at": expires_at,
+            "seconds_remaining": remaining,
+            "min_commitment_age_sec": MIN_COMMITMENT_AGE_SEC,
+            "max_commitment_age_sec": MAX_COMMITMENT_AGE_SEC,
+            "source": "ens_controller.commitments",
+            "note": "Read from the live controller mapping. Not a success state.",
+        }
+
     def _require_intent(self, intent_id) -> RegistrationIntent:
         rec = self.store.get(str(intent_id or "").strip())
         if rec is None:
             raise ProductError("unknown_intent", "Unknown registration intent.", http_status=404)
         return rec
-
-
-def _require_duration(duration) -> int:
-    try:
-        value = int(duration)
-    except (TypeError, ValueError) as exc:
-        raise ProductError("invalid_duration", "duration must be an integer number of seconds.") from exc
-    if value < MIN_REGISTRATION_DURATION_SEC:
-        raise ProductError(
-            "invalid_duration",
-            f"duration must be >= {MIN_REGISTRATION_DURATION_SEC} seconds (28 days).",
-            {"min": MIN_REGISTRATION_DURATION_SEC},
-        )
-    return value
 
 
 def _resolver_and_reverse(body: dict) -> tuple[str, int]:
@@ -356,22 +385,13 @@ def _txh(value: str) -> str:
     return text
 
 
-def labelhash_hex(label: str) -> str:
-    """ENS labelhash: keccak256(bytes(label))."""
-    return "0x" + _keccak(text=label).hex()
-
-
 def _topic_address(addr: str) -> str:
     hexpart = str(addr).lower().replace("0x", "")
     return "0x" + hexpart.rjust(64, "0")
 
 
 def _has_name_registered(receipt: dict, label: str, owner: str) -> bool:
-    """Success = NameRegistered on the live controller for THIS label and owner.
-
-    A NameRegistered log for a different name, or a different owner of the same
-    name, is not this intent's success. topic0 alone is not enough.
-    """
+    """Success = NameRegistered on the live controller for THIS label and owner."""
     logs = receipt.get("logs") or []
     want_ctrl = CONTROLLER.lower()
     want_topic0 = NAME_REGISTERED_TOPIC0.lower()

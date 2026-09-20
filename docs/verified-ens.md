@@ -39,6 +39,13 @@ Deployment records: [electroneum/ens-contracts `deployments/electroneum`](https:
 - Native payment is ETN, not ETH.
 - No legacy registrar controller on this network.
 
+## Renewal (verified ABI, 2026-09-20)
+
+`renew(string label, uint256 duration, bytes32 referrer)` selector `18026ad1`.
+Payable. Charges `rentPrice.base` only. No commit/reveal. `NameRenewed`
+topic1 is the labelhash. Anyone may pay. Names with `available() == true`
+are not renewable.
+
 ## Unverified
 
 - Exact gas for commit/register (wallet estimates).

@@ -11,6 +11,9 @@ This service:
 - quotes native ETN rent from `rentPrice`
 - prepares unsigned `commit` then `register` calldata
 - tracks intent state (`prepared` → `submitted` → `confirmed`/`failed`)
+- reads live owner/expiry from the base registrar for domain profiles
+- prepares unsigned `renew` calldata (base rent only)
+- serves the primary-registration UI
 - may display EAE facts after the chain event exists
 
 This service does **not**:
@@ -36,6 +39,13 @@ This service does **not**:
 - `GET /api/v1/registration/{intent_id}`
 - `POST /api/v1/registration/{intent_id}/submitted`
 - `POST /api/v1/registration/{intent_id}/confirm` (read receipt only)
+- `GET /api/v1/domains/profile?name=`
+- `GET /api/v1/registration/{intent_id}/commitment`
+- `GET /api/v1/renewal/quote`
+- `POST /api/v1/renewal/prepare`
+- `GET /api/v1/renewal/{intent_id}`
+- `POST /api/v1/renewal/{intent_id}/submitted`
+- `POST /api/v1/renewal/{intent_id}/confirm`
 - `GET /api/v1/owners/{address}/domains` (EAE facts, not local authority)
 - `GET /api/v1/marketplace` (`not_implemented`)
 

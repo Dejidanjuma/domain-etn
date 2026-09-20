@@ -19,6 +19,15 @@ class SecurityTests(unittest.TestCase):
         for token in ("Account.from_key", "privateKey", "mnemonic", "eth_account"):
             self.assertNotIn(token, blob)
 
+    def test_web_has_no_key_prompts(self):
+        web = pathlib.Path(__file__).resolve().parents[1] / "web"
+        blob = ""
+        for path in web.rglob("*"):
+            if path.suffix in {".js", ".html"}:
+                blob += path.read_text()
+        for token in ("Account.from_key", "privateKey", "mnemonic", "seed phrase"):
+            self.assertNotIn(token, blob)
+
     def test_broadcast_methods_are_hard_refused(self):
         self.assertIn("eth_sendRawTransaction", BANNED_METHODS)
         self.assertIn("eth_sendTransaction", BANNED_METHODS)

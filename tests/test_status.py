@@ -5,8 +5,8 @@ from __future__ import annotations
 import unittest
 
 from src.domain_etn.ens.addresses import CONTROLLER
-from src.domain_etn.registration.service import NAME_REGISTERED_TOPIC0, labelhash_hex
-from tests.helpers import ALICE, REGISTRANT, SECRET, YEAR, make_client
+from src.domain_etn.ens.encoding import NAME_REGISTERED_TOPIC0, labelhash_hex
+from tests.helpers import ALICE, REGISTRANT, SECRET, YEAR, make_client, mature_commitment
 
 TX = "0x" + "ab" * 32
 OTHER_OWNER = "0x2222222222222222222222222222222222222222"
@@ -36,6 +36,7 @@ class StatusTests(unittest.TestCase):
                 "secret": SECRET,
             }
         )
+        mature_commitment(rpc, commit["commitment"])
         service.prepare_register({"intent_id": commit["intent_id"], "secret": SECRET})
         return client, commit["intent_id"]
 

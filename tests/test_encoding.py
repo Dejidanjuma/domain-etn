@@ -7,16 +7,20 @@ import unittest
 from eth_utils import keccak
 
 from src.domain_etn.ens.encoding import (
+    NAME_REGISTERED_TOPIC0,
+    NAME_RENEWED_TOPIC0,
     SEL_COMMIT,
     SEL_MAKE_COMMITMENT,
     SEL_REGISTER,
+    SEL_RENEW,
     commitment_hash,
     encode_registration,
+    labelhash_hex,
     registration_tuple,
     tx_commit,
     tx_register,
+    tx_renew,
 )
-from src.domain_etn.registration.service import NAME_REGISTERED_TOPIC0, labelhash_hex
 
 
 class EncodingTests(unittest.TestCase):
@@ -24,9 +28,9 @@ class EncodingTests(unittest.TestCase):
         self.assertEqual(SEL_COMMIT.hex(), "f14fcbc8")
         self.assertEqual(SEL_REGISTER.hex(), "ef9c8805")
         self.assertEqual(SEL_MAKE_COMMITMENT.hex(), "cf7d6e01")
+        self.assertEqual(SEL_RENEW.hex(), "18026ad1")
 
     def test_commitment_is_keccak_of_abi_encode(self):
-        # Same tuple as the 2026-09-19 live makeCommitment eth_call.
         reg = registration_tuple(
             label="alice",
             owner="0x1111111111111111111111111111111111111111",
@@ -67,6 +71,15 @@ class EncodingTests(unittest.TestCase):
         self.assertEqual(
             labelhash_hex("alice"),
             "0x9c0257114eb9399a2985f8e75dad7600c5d89fe3824ffa99ec1c3eb8bf3b0501",
+        )
+
+    def test_renew_tx_charges_supplied_base_only(self):
+        tx = tx_renew("taken", 365 * 24 * 3600, 2 * 10**18)
+        self.assertEqual(tx["value"], str(2 * 10**18))
+        self.assertTrue(tx["data"].startswith("0x18026ad1"))
+        self.assertEqual(
+            NAME_RENEWED_TOPIC0,
+            "0x" + keccak(b"NameRenewed(string,bytes32,uint256,uint256,bytes32)").hex(),
         )
 
 

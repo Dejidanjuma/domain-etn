@@ -14,8 +14,14 @@ class FakeEae:
     def investigate(self, address):
         return {"type": "investigation", "address": address, "source": "eae"}
 
+    def owner_domains(self, address):
+        return {"domains": [{"name": "taken.etn", "nft_owner": address}]}
+
     def domain_search(self, name):
         return {"q": name}
+
+    def domain_profile(self, name):
+        return None
 
 
 class EaeBoundaryTests(unittest.TestCase):
@@ -41,7 +47,16 @@ class EaeBoundaryTests(unittest.TestCase):
         self.assertEqual(res.status_code, 200)
         body = res.json()
         self.assertTrue(body["not_ownership_source"])
-        self.assertEqual(body["eae"]["source"], "eae")
+        self.assertEqual(body["authority"], "eae_indexed_facts")
+        self.assertEqual(body["domains"][0]["name"], "taken.etn")
+
+    def test_owner_domains_without_eae_are_empty_and_honest(self):
+        client, _, _ = make_client()
+        res = client.get(f"/api/v1/owners/{REGISTRANT}/domains")
+        body = res.json()
+        self.assertTrue(body["not_ownership_source"])
+        self.assertEqual(body["authority"], "not_queried")
+        self.assertEqual(body["domains"], [])
 
 
 if __name__ == "__main__":
