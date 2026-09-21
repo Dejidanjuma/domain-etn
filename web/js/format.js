@@ -50,6 +50,20 @@ export function formatTime(unix) {
   return new Date(Number(unix) * 1000).toLocaleString();
 }
 
+export function formatRelative(unix, now = Date.now() / 1000) {
+  if (!unix) return "—";
+  const delta = Number(unix) - Number(now);
+  const abs = Math.abs(delta);
+  const days = Math.round(abs / DAY);
+  if (days < 1) {
+    const hours = Math.max(1, Math.round(abs / 3600));
+    return delta >= 0 ? `in ${hours}h` : `${hours}h ago`;
+  }
+  if (days < 60) return delta >= 0 ? `in ${days} days` : `${days} days ago`;
+  const years = (days / 365).toFixed(1).replace(/\.0$/, "");
+  return delta >= 0 ? `in ${years} years` : `${years} years ago`;
+}
+
 export function mmss(total) {
   const s = Math.max(0, Math.ceil(Number(total) || 0));
   const m = Math.floor(s / 60);

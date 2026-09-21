@@ -28,6 +28,7 @@ This service prepares unsigned transactions for the user's wallet.
 It does not custody funds, hold private keys, or broadcast transactions.
 EAE is an optional intelligence dependency, not a registrar.
 Primary registration and secondary marketplace are different flows.
+Marketplace settlement is not deployed on Electroneum.
 """
 
 
@@ -52,9 +53,13 @@ def create_app(
     app.state.profile = DomainProfile(app.state.rpc, eae=app.state.eae)
 
     @app.middleware("http")
-    async def _no_store(request: Request, call_next):
+    async def _security_headers(request: Request, call_next):
         response = await call_next(request)
         response.headers.setdefault("Cache-Control", "no-store")
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
         return response
 
     @app.exception_handler(ProductError)
@@ -82,9 +87,20 @@ def create_app(
         def my_names():
             return FileResponse(WEB_DIR / "index.html")
 
+        @app.get("/discover")
+        def discover_page():
+            return FileResponse(WEB_DIR / "index.html")
+
+        @app.get("/market")
+        def market_page():
+            return FileResponse(WEB_DIR / "index.html")
+
         @app.get("/d/{name:path}")
         def domain_page(name: str):
             return FileResponse(WEB_DIR / "index.html")
 
+        @app.get("/w/{address}")
+        def wallet_page(address: str):
+            return FileResponse(WEB_DIR / "index.html")
 
     return app

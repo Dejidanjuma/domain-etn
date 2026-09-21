@@ -50,7 +50,11 @@ class SecurityTests(unittest.TestCase):
         self.assertFalse(body["private_keys"])
         self.assertFalse(body["registrar"])
         self.assertEqual(body["registration"]["payment"], "native_ETN")
+        self.assertFalse(body["marketplace"]["deployed"])
 
-
-if __name__ == "__main__":
-    unittest.main()
+    def test_quote_secret_not_in_responses(self):
+        client, _, _ = make_client()
+        for path in ("/api/v1/contract", "/api/v1/marketplace", "/health"):
+            text = client.get(path).text.lower()
+            self.assertNotIn("quote_secret", text)
+            self.assertNotIn("test-quote-secret", text)

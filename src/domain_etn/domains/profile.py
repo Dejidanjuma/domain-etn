@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import time
 
+from src.domain_etn.domains.lifecycle import classify
+from src.domain_etn.eae.client import intelligence_from_eae
 from src.domain_etn.ens.addresses import (
     BASE_REGISTRAR,
     CHAIN_ID,
@@ -30,11 +32,16 @@ class DomainProfile:
         expires_at = int(self.ens.name_expires(parsed["label"]) or 0)
         owner = None if available else self.ens.owner_of(parsed["label"])
         ts = int(now if now is not None else time.time())
-        in_grace = bool(expires_at and ts >= expires_at and not available)
-        renewable = not available
+        lifecycle = classify(available=available, expires_at=expires_at, now=ts, grace_period_sec=GRACE_PERIOD_SEC)
         eae_facts = None
         if self.eae is not None and getattr(self.eae, "enabled", lambda: False)():
-            eae_facts = self.eae.domain_profile(parsed["name"]) or self.eae.domain_search(parsed["name"])
+            profile_fn = getattr(self.eae, "domain_profile", None)
+            search_fn = getattr(self.eae, "domain_search", None)
+            if callable(profile_fn):
+                eae_facts = profile_fn(parsed["name"])
+            if eae_facts is None and callable(search_fn):
+                eae_facts = search_fn(parsed["name"])
+        intelligence = intelligence_from_eae(eae_facts)
         return {
             "type": "domain_profile",
             "name": parsed["name"],
@@ -42,11 +49,12 @@ class DomainProfile:
             "labelhash": labelhash_hex(parsed["label"]),
             "available": available,
             "status": "available" if available else "registered",
+            "lifecycle": lifecycle,
             "owner": owner,
             "expires_at": expires_at or None,
             "grace_period_sec": GRACE_PERIOD_SEC,
-            "in_grace": in_grace,
-            "renewable": renewable,
+            "in_grace": lifecycle["in_grace"],
+            "renewable": lifecycle["renewable"],
             "chain_id": CHAIN_ID,
             "controller": CONTROLLER,
             "base_registrar": BASE_REGISTRAR,
@@ -55,13 +63,16 @@ class DomainProfile:
                 "availability": "ens_controller.available",
                 "owner": "base_registrar.ownerOf",
                 "expires": "base_registrar.nameExpires",
+                "lifecycle": lifecycle["source"],
             },
             "eae": eae_facts,
+            "intelligence": intelligence,
             "eae_is_not_ownership_source": True,
             "marketplace": MARKETPLACE,
             "note": (
                 "Owner and expiry are live eth_call reads. "
                 "ownerOf reverts after expiry (including grace), so owner may be null while the name is still not available. "
-                "EAE facts are indexed intelligence, not registration authority."
+                "EAE facts are indexed intelligence, not registration authority. "
+                "Marketplace settlement is not deployed on Electroneum."
             ),
         }

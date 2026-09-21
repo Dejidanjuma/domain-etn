@@ -31,6 +31,18 @@ class UiTests(unittest.TestCase):
         client, _, _ = make_client()
         self.assertEqual(client.get("/me").status_code, 200)
 
+    def test_discover_and_market_and_wallet_routes(self):
+        client, _, _ = make_client()
+        for path in ("/discover", "/market", "/w/0x1111111111111111111111111111111111111111"):
+            res = client.get(path)
+            self.assertEqual(res.status_code, 200, path)
+            self.assertIn("text/html", res.headers.get("content-type", ""))
+
+    def test_nav_contains_product_surfaces(self):
+        html = (WEB / "index.html").read_text()
+        for label in ("Search", "Discover", "My names", "Marketplace"):
+            self.assertIn(label, html)
+
     def test_js_state_machine_exists(self):
         flow = (WEB / "js" / "flow.js").read_text()
         self.assertIn("REGISTERED_SUCCESSFULLY", flow)
@@ -45,12 +57,19 @@ class UiTests(unittest.TestCase):
         for token in ("privateKey", "mnemonic", "seed phrase", "Account.from_key"):
             self.assertNotIn(token, blob)
 
+    def test_esc_uses_html_entities(self):
+        app = (WEB / "js" / "app.js").read_text()
+        self.assertIn("&", app)
+        self.assertIn("<", app)
+
     def test_api_still_json(self):
         client, _, _ = make_client()
         res = client.get("/api/v1/contract")
         self.assertEqual(res.json()["flows"]["renewal"], "implemented_prepare_only")
         self.assertFalse(res.json()["broadcasts"])
 
-
-if __name__ == "__main__":
-    unittest.main()
+    def test_security_headers(self):
+        client, _, _ = make_client()
+        res = client.get("/")
+        self.assertEqual(res.headers.get("x-content-type-options"), "nosniff")
+        self.assertEqual(res.headers.get("x-frame-options"), "DENY")

@@ -14,6 +14,7 @@ from src.domain_etn.errors import ProductError
 
 TLD = "etn"
 _LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+_ADDR_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")
 MIN_LABEL_LEN = 3  # ETHRegistrarController.valid
 MAX_LABEL_LEN = 63
 
@@ -56,6 +57,13 @@ def parse_registration_name(raw: str) -> dict:
         "tld": TLD,
         "normalized": f"{label}.{TLD}",
     }
+
+
+def parse_address(raw: str) -> str:
+    text = str(raw or "").strip()
+    if not _ADDR_RE.fullmatch(text):
+        raise ProductError("invalid_address", "Expected a 20-byte 0x-prefixed address.", {"address": raw})
+    return text
 
 
 def require_duration(duration) -> int:

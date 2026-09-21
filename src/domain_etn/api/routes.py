@@ -6,7 +6,12 @@ from fastapi import APIRouter, Request
 
 from src.domain_etn import PRODUCT, __version__
 from src.domain_etn.domains.profile import DomainProfile
-from src.domain_etn.eae.client import normalize_owner_domains, refuse_registration_via_eae
+from src.domain_etn.eae.client import (
+    intelligence_from_eae,
+    normalize_history,
+    normalize_owner_domains,
+    refuse_registration_via_eae,
+)
 from src.domain_etn.ens.addresses import (
     BASE_REGISTRAR,
     CHAIN_ID,
@@ -27,7 +32,9 @@ from src.domain_etn.ens.addresses import (
     REVERSE_REGISTRAR,
     UNUSED_CONTROLLER,
 )
+from src.domain_etn.marketplace import observe as marketplace_observe
 from src.domain_etn.marketplace.boundary import NOT_IMPLEMENTED as MARKETPLACE
+from src.domain_etn.names import parse_address, parse_registration_name
 from src.domain_etn.registration.service import RegistrationService
 from src.domain_etn.renewal.service import RenewalService
 
@@ -44,6 +51,19 @@ def _renew(request: Request) -> RenewalService:
 
 def _profile(request: Request) -> DomainProfile:
     return request.app.state.profile
+
+
+def _eae(request: Request):
+    return request.app.state.eae
+
+
+def _eae_call(eae, method: str, *args, **kwargs):
+    if eae is None or not getattr(eae, "enabled", lambda: False)():
+        return None
+    fn = getattr(eae, method, None)
+    if not callable(fn):
+        return None
+    return fn(*args, **kwargs)
 
 
 @router.get("/health")
@@ -81,6 +101,7 @@ def contract():
             "primary_registration": "implemented_prepare_only",
             "renewal": "implemented_prepare_only",
             "secondary_marketplace": "not_implemented",
+            "marketplace_indexed_facts": "optional_eae_observation",
         },
         "chain": {
             "chain_id": CHAIN_ID,
@@ -101,6 +122,7 @@ def contract():
             "default_reverse_registrar": DEFAULT_REVERSE_REGISTRAR,
             "name_wrapper": NAME_WRAPPER,
             "wrapper_used_by_primary_register": False,
+            "marketplace": None,
         },
         "registration": {
             "commit_reveal": True,
@@ -119,6 +141,7 @@ def contract():
             "commit_reveal": False,
             "anyone_may_pay": True,
         },
+        "marketplace": MARKETPLACE,
         "ai_interpretation": "not_implemented",
     }
 
@@ -136,6 +159,73 @@ def quote(request: Request, name: str, duration: int):
 @router.get("/api/v1/domains/profile")
 def domain_profile(request: Request, name: str):
     return _profile(request).get(name)
+
+
+@router.get("/api/v1/domains/history")
+def domain_history(request: Request, name: str):
+    parsed = parse_registration_name(name)
+    eae = _eae(request)
+    raw = _eae_call(eae, "domain_history", parsed["name"])
+    events = normalize_history(raw)
+    return {
+        "type": "domain_history",
+        "name": parsed["name"],
+        "authority": "eae_indexed_facts" if raw is not None else "not_queried",
+        "not_ownership_source": True,
+        "sale": "not_inferred",
+        "events": events,
+        "eae": raw,
+        "note": (
+            "Indexed domain events from EAE, when configured. "
+            "Not a trace. Transfer is not a sale. Absence is not absence on-chain."
+        ),
+    }
+
+
+@router.get("/api/v1/domains/discovery")
+def domain_discovery(request: Request):
+    eae = _eae(request)
+    raw = _eae_call(eae, "discovery")
+    categories = {}
+    if isinstance(raw, dict):
+        categories = raw.get("categories") or {
+            "recently_seen": raw.get("recent") or raw.get("recently_seen") or [],
+            "recently_registered": raw.get("recent_registrations") or raw.get("recently_registered") or [],
+        }
+    return {
+        "type": "domain_discovery",
+        "authority": "eae_indexed_facts" if raw is not None else "not_queried",
+        "not_availability": True,
+        "not_ranking": True,
+        "categories": categories,
+        "eae": raw,
+        "note": (
+            "Indexed catalog recency from EAE. Not live availability. "
+            "Not a popularity ranking. DOMAIN.etn does not invent names."
+        ),
+    }
+
+
+@router.get("/api/v1/domains/search")
+def domain_search(request: Request, q: str | None = None, prefix: str | None = None):
+    eae = _eae(request)
+    raw = _eae_call(eae, "catalog_search", q, prefix) or _eae_call(eae, "domain_search", q or prefix or "")
+    results = []
+    if isinstance(raw, dict):
+        results = raw.get("results") or raw.get("domains") or []
+    return {
+        "type": "indexed_search",
+        "q": q,
+        "prefix": prefix,
+        "authority": "eae_indexed_facts" if raw is not None else "not_queried",
+        "not_availability": True,
+        "results": results if isinstance(results, list) else [],
+        "eae": raw,
+        "note": (
+            "Indexed catalog search. This is not availability and not a marketplace. "
+            "Use /api/v1/domains/availability for live controller.available."
+        ),
+    }
 
 
 @router.post("/api/v1/registration/prepare-commit")
@@ -201,20 +291,48 @@ def renewal_confirm(request: Request, intent_id: str):
     return _renew(request).confirm(intent_id)
 
 
+@router.get("/api/v1/owners/{address}")
+def owner_intelligence(request: Request, address: str):
+    parsed = parse_address(address)
+    eae = _eae(request)
+    facts = _eae_call(eae, "owner_intelligence", parsed) or _eae_call(eae, "investigate", parsed)
+    domains = []
+    owner_fn = _eae_call(eae, "owner_domains", parsed)
+    if owner_fn is not None:
+        domains = normalize_owner_domains(parsed, owner_fn)
+    elif facts is not None:
+        domains = normalize_owner_domains(parsed, facts)
+    return {
+        "type": "owner_intelligence",
+        "address": parsed,
+        "authority": "eae_indexed_facts" if facts is not None or owner_fn is not None else "not_queried",
+        "not_ownership_source": True,
+        "not_identity": True,
+        "domains": domains,
+        "intelligence": intelligence_from_eae(facts),
+        "eae": facts,
+        "note": (
+            "Indexed associations for this address. Not a person label. "
+            "Not a marketplace counterparty. Live ownership is on the base registrar."
+        ),
+    }
+
+
 @router.get("/api/v1/owners/{address}/domains")
 def owner_domains(request: Request, address: str):
-    eae = request.app.state.eae
+    parsed = parse_address(address)
+    eae = _eae(request)
     facts = None
     if eae.enabled():
         owner_fn = getattr(eae, "owner_domains", None)
         if callable(owner_fn):
-            facts = owner_fn(address)
+            facts = owner_fn(parsed)
         if facts is None and hasattr(eae, "investigate"):
-            facts = eae.investigate(address)
-    domains = normalize_owner_domains(address, facts)
+            facts = eae.investigate(parsed)
+    domains = normalize_owner_domains(parsed, facts)
     return {
         "type": "user_domains",
-        "address": address,
+        "address": parsed,
         "authority": "eae_indexed_facts" if facts is not None else "not_queried",
         "not_ownership_source": True,
         "domains": domains,
@@ -228,5 +346,15 @@ def owner_domains(request: Request, address: str):
 
 
 @router.get("/api/v1/marketplace")
-def marketplace():
-    return MARKETPLACE
+def marketplace(request: Request):
+    return marketplace_observe.descriptor(eae=_eae(request))
+
+
+@router.get("/api/v1/marketplace/listings")
+def marketplace_listings(request: Request, status: str | None = None):
+    return marketplace_observe.listings(eae=_eae(request), status=status)
+
+
+@router.get("/api/v1/marketplace/activity")
+def marketplace_activity(request: Request):
+    return marketplace_observe.activity(eae=_eae(request))

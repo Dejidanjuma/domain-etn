@@ -1,9 +1,10 @@
 import { api } from "./api.js";
 import { reduce, createState, Phase, userCopy, isSuccess } from "./flow.js";
 import { parseName } from "./names.js";
-import { DURATIONS, formatDuration, formatEtn, formatTime, mmss, shortAddr, explorerTx, explorerAddr, YEAR } from "./format.js";
+import { DURATIONS, formatDuration, formatEtn, formatTime, formatRelative, mmss, shortAddr, explorerTx, explorerAddr } from "./format.js";
 import { connect, hasWallet, onWalletChange, sendPrepared, switchToElectroneum, getAccounts, chainId as walletChain, isElectroneum } from "./wallet.js";
 import { saveSession, sessionFor, clearSession, randomSecret, rememberRecent, loadRecent } from "./storage.js";
+import { lifecycleOf, historyRows, relatedAddresses } from "./lifecycle.js";
 
 const main = document.getElementById("main");
 const live = document.getElementById("live");
@@ -40,12 +41,24 @@ function announce(text) {
   if (live) live.textContent = text || "";
 }
 
+function setMeta(title, description) {
+  document.title = title;
+  const meta = document.querySelector('meta[name="description"]');
+  if (meta && description) meta.setAttribute("content", description);
+  const og = document.querySelector('meta[property="og:title"]');
+  if (og) og.setAttribute("content", title);
+}
+
 function route() {
   const path = location.pathname.replace(/\/+$/, "") || "/";
   if (path === "/") return { view: "home" };
   if (path === "/me") return { view: "me" };
+  if (path === "/discover") return { view: "discover" };
+  if (path === "/market") return { view: "market" };
   const domain = path.match(/^\/d\/(.+)$/);
   if (domain) return { view: "domain", name: decodeURIComponent(domain[1]) };
+  const owner = path.match(/^\/w\/(0x[a-fA-F0-9]{40})$/);
+  if (owner) return { view: "owner", address: owner[1] };
   return { view: "home" };
 }
 
@@ -55,11 +68,13 @@ function go(path) {
 }
 
 window.addEventListener("popstate", boot);
-document.querySelectorAll("[data-link]").forEach((el) => {
-  el.addEventListener("click", (ev) => {
-    ev.preventDefault();
-    go(el.getAttribute("href"));
-  });
+document.addEventListener("click", (ev) => {
+  const a = ev.target.closest("[data-link]");
+  if (!a || a.target === "_blank") return;
+  const href = a.getAttribute("href") || a.getAttribute("data-link");
+  if (!href || href.startsWith("http")) return;
+  ev.preventDefault();
+  go(href);
 });
 
 walletBtn.addEventListener("click", async () => {
@@ -97,18 +112,31 @@ async function hydrateWallet() {
 
 async function boot() {
   const r = route();
+  if (r.view !== "domain") {
+    clearInterval(waitTimer);
+    clearInterval(confirmTimer);
+  }
+  markNav(r.view);
   if (r.view === "home") {
     if (!state.name) state = { ...state, phase: Phase.IDLE };
     render();
     return;
   }
-  if (r.view === "me") {
+  if (r.view === "me" || r.view === "discover" || r.view === "market" || r.view === "owner") {
     render();
     return;
   }
   if (r.view === "domain") {
     await openName(r.name);
   }
+}
+
+function markNav(view) {
+  document.querySelectorAll("[data-nav]").forEach((el) => {
+    const on = el.getAttribute("data-nav") === view;
+    if (on) el.setAttribute("aria-current", "page");
+    else el.removeAttribute("aria-current");
+  });
 }
 
 async function openName(raw) {
@@ -398,6 +426,7 @@ function steps() {
 function renderWalletChrome() {
   if (state.wallet.address) {
     walletBtn.textContent = shortAddr(state.wallet.address);
+    walletBtn.setAttribute("aria-label", `Connected wallet ${state.wallet.address}`);
     if (!isElectroneum(state.wallet.chainId)) {
       netPill.hidden = false;
       netPill.classList.add("warn");
@@ -409,13 +438,14 @@ function renderWalletChrome() {
     }
   } else {
     walletBtn.textContent = "Connect wallet";
+    walletBtn.setAttribute("aria-label", "Connect wallet");
     netPill.hidden = true;
   }
 }
 
 function searchForm(autofill = "") {
   return `
-    <form class="search" id="search-form">
+    <form class="search" id="search-form" role="search">
       <label class="sr-only" for="q">Search a .etn domain</label>
       <input id="q" name="q" value="${esc(autofill)}" placeholder="satoshi.etn" autocomplete="off" spellcheck="false" />
       <button class="btn" type="submit">Search</button>
@@ -423,7 +453,7 @@ function searchForm(autofill = "") {
     <div class="examples">
       <button type="button" data-ex="satoshi.etn">satoshi.etn</button>
       <button type="button" data-ex="nakamoto.etn">nakamoto.etn</button>
-      <button type="button" data-ex="example.etn">example.etn</button>
+      <button type="button" data-ex="wallet.etn">wallet.etn</button>
     </div>`;
 }
 
@@ -458,6 +488,7 @@ function errorBox() {
 }
 
 function homeView() {
+  setMeta("DOMAIN.etn — Find your .etn name", "Search, register, and renew .etn names on Electroneum with your own wallet.");
   return `
     <section class="hero">
       <p class="kicker">Electroneum names</p>
@@ -465,6 +496,7 @@ function homeView() {
       <p class="lede">Search a name, see the live price, then register it with your own wallet. DOMAIN.etn never holds your keys or your ETN.</p>
       ${searchForm()}
       ${errorBox()}
+      <p class="note home-links">Looking up a registered name? Open its profile. Or <a href="/discover" data-link>browse indexed names</a>.</p>
     </section>`;
 }
 
@@ -488,6 +520,7 @@ function quoteCard() {
 }
 
 function availableView() {
+  setMeta(`${state.name} is available — DOMAIN.etn`, `Register ${state.name} on Electroneum with your own wallet.`);
   return `
     <section class="domain-hero">
       <p class="kicker">Available</p>
@@ -515,7 +548,7 @@ function wizardExtras() {
       <p>Your name is reserved for registration. Registration becomes available in</p>
       <div class="countdown" aria-live="polite">${mmss(state.waitRemaining)}</div>
       <div class="progress"><span style="width:${pct}%"></span></div>
-      ${state.intent && state.intent.commit_tx_hash ? `<p class="mono tx-box"><a href="${explorerTx(state.intent.commit_tx_hash)}">Reservation transaction</a></p>` : ""}
+      ${state.intent && state.intent.commit_tx_hash ? `<p class="mono tx-box"><a rel="noopener noreferrer" target="_blank" href="${explorerTx(state.intent.commit_tx_hash)}">Reservation transaction</a></p>` : ""}
     </div>`;
   }
   if (p === Phase.REGISTER_READY) {
@@ -537,7 +570,7 @@ function wizardExtras() {
     return `<div class="card" style="margin-top:16px">
       <p>Transaction submitted. Waiting for blockchain confirmation…</p>
       <p class="note">Submission is not registration. DOMAIN.etn waits for the official NameRegistered event.</p>
-      ${state.intent && state.intent.register_tx_hash ? `<p class="mono"><a href="${explorerTx(state.intent.register_tx_hash)}">${esc(state.intent.register_tx_hash)}</a></p>` : ""}
+      ${state.intent && state.intent.register_tx_hash ? `<p class="mono"><a rel="noopener noreferrer" target="_blank" href="${explorerTx(state.intent.register_tx_hash)}">${esc(state.intent.register_tx_hash)}</a></p>` : ""}
     </div>`;
   }
   if (p === Phase.COMMIT_READY) {
@@ -565,7 +598,7 @@ function successCard() {
       <div class="metric"><label>Duration</label><b>${esc(formatDuration(intent.duration))}</b></div>
       <div class="metric"><label>Network</label><b>Electroneum</b></div>
     </div>
-    ${intent.register_tx_hash ? `<p class="mono tx-box"><a href="${explorerTx(intent.register_tx_hash)}">${esc(intent.register_tx_hash)}</a></p>` : ""}
+    ${intent.register_tx_hash ? `<p class="mono tx-box"><a rel="noopener noreferrer" target="_blank" href="${explorerTx(intent.register_tx_hash)}">${esc(intent.register_tx_hash)}</a></p>` : ""}
     <div class="cta-row"><button class="btn" id="view-domain" type="button">View domain</button></div>
   </div>`;
 }
@@ -573,26 +606,86 @@ function successCard() {
 function profileView() {
   const p = state.profile || {};
   const owner = p.owner;
+  const life = lifecycleOf(p);
+  const hist = historyRows(p);
+  const related = relatedAddresses(p);
+  const intel = p.intelligence || {};
+  setMeta(`${p.name || state.name} — DOMAIN.etn`, `${p.name || state.name} is ${life.label.toLowerCase()} on Electroneum.`);
   return `
     <section class="domain-hero">
-      <p class="kicker">${p.in_grace ? "In grace period" : "Registered"}</p>
+      <p class="kicker">${esc(life.label)}</p>
       <h1>${domainTitle(p.name || state.name)}</h1>
-      <div class="status-row"><span class="status registered">${p.in_grace ? "Expired · renewable" : "Registered"}</span></div>
+      <div class="status-row"><span class="status ${esc(life.className)}">${esc(life.label)}</span></div>
     </section>
     ${errorBox()}
     <div class="card">
       <div class="grid">
-        <div class="metric"><label>Owner</label><b>${owner ? `<a href="${explorerAddr(owner)}">${esc(shortAddr(owner))}</a>` : "Not visible on-chain"}</b></div>
-        <div class="metric"><label>Expires</label><b>${esc(formatTime(p.expires_at))}</b></div>
+        <div class="metric"><label>Owner</label><b>${
+          owner
+            ? `<a href="/w/${esc(owner)}" data-link>${esc(shortAddr(owner))}</a>`
+            : "Not visible on-chain"
+        }</b></div>
+        <div class="metric"><label>Expires</label><b>${esc(formatTime(p.expires_at))}</b><span class="hint">${esc(formatRelative(p.expires_at))}</span></div>
         <div class="metric"><label>Network</label><b>Electroneum</b></div>
-        <div class="metric"><label>Status</label><b>${p.in_grace ? "Grace period" : "Active"}</b></div>
+        <div class="metric"><label>Lifecycle</label><b>${esc(life.label)}</b></div>
       </div>
       <p class="note">${esc(p.note || "Live on-chain facts. EAE intelligence is optional and is not ownership.")}</p>
+      ${owner ? `<p class="note">On-chain owner: <a rel="noopener noreferrer" target="_blank" href="${explorerAddr(owner)}">${esc(owner)}</a></p>` : ""}
       ${p.renewable ? `<div class="cta-row"><button class="btn" id="renew-btn" type="button">Renew</button></div>` : ""}
       ${state.phase === Phase.RENEW_QUOTE || state.phase === Phase.RENEW_READY ? renewBox() : ""}
-      ${p.eae ? `<div class="tx-box"><p class="kicker">Intelligence</p><p class="note">Indexed EAE facts are shown when configured. Absence from EAE is not absence on-chain.</p></div>` : `<p class="note">No EAE intelligence is configured for this process.</p>`}
-      <p class="note">Marketplace listing is not implemented.</p>
-    </div>`;
+    </div>
+    <section class="stack">
+      <h2>History</h2>
+      <p class="note">Indexed EAE events. Transfer is not a sale. Live registration is the chain, not this list.</p>
+      <div id="history">${hist.length ? historyList(hist) : `<div class="empty">${intel.configured ? "No indexed events for this name yet." : "EAE is not configured, so there is no indexed history."}</div>`}</div>
+    </section>
+    <section class="stack">
+      <h2>Related addresses</h2>
+      <p class="note">Factual associations from EAE. Not a social graph and not counterparties.</p>
+      ${
+        related.length
+          ? `<ul class="chips">${related
+              .map((row) => {
+                const addr = row.address || row;
+                const role = row.role ? `${esc(row.role)} · ` : "";
+                return `<li><a href="/w/${esc(addr)}" data-link>${role}${esc(shortAddr(addr))}</a></li>`;
+              })
+              .join("")}</ul>`
+          : `<div class="empty">${intel.configured ? "No related addresses indexed." : "EAE is not configured."}</div>`
+      }
+    </section>
+    <section class="stack">
+      <h2>Related names</h2>
+      <p class="note">Other indexed names for the current NFT owner, when EAE has them. Not proof of ownership.</p>
+      <div id="related-names">${owner ? "<p class='note'>Loading indexed names…</p>" : "<div class='empty'>Owner is not visible on-chain, so related names cannot be listed.</div>"}</div>
+    </section>
+    <section class="stack">
+      <h2>Marketplace</h2>
+      ${marketNote(p)}
+    </section>`;
+}
+
+function historyList(rows) {
+  return `<ol class="timeline">${rows
+    .map((row) => {
+      const label = row.label || row.event_type || "Event";
+      const tx = row.tx_hash
+        ? `<a rel="noopener noreferrer" target="_blank" href="${explorerTx(row.tx_hash)}">transaction</a>`
+        : "";
+      const block = row.block_number != null ? `block ${esc(row.block_number)}` : "";
+      return `<li><strong>${esc(label)}</strong><span class="muted">${[block, tx].filter(Boolean).join(" · ")}</span></li>`;
+    })
+    .join("")}</ol>`;
+}
+
+function marketNote(profile) {
+  const facts = (profile.intelligence && profile.intelligence.marketplace_facts) || profile.marketplace || {};
+  const status = facts.status || (profile.marketplace && profile.marketplace.status) || "not_implemented";
+  return `<div class="card">
+    <p class="note">Settlement is not live on Electroneum. DOMAIN.etn will not prepare a listing or purchase until a deployed marketplace contract exists.</p>
+    <p class="note">Indexed status: <b>${esc(status)}</b>. Offers and auctions are not implemented.</p>
+    <p><a href="/market" data-link>Marketplace status</a></p>
+  </div>`;
 }
 
 function renewBox() {
@@ -611,15 +704,64 @@ function renewBox() {
 }
 
 function meView() {
+  setMeta("My names — DOMAIN.etn", "Indexed .etn names for a connected wallet. DOMAIN.etn does not keep an ownership database.");
   const recent = loadRecent();
   return `
-    <section class="hero" style="text-align:left">
+    <section class="hero left">
       <p class="kicker">Wallet</p>
       <h1>My names</h1>
       <p class="lede">DOMAIN.etn does not keep an ownership database. Names below are either indexed by EAE or remembered from this browser after a confirmed registration.</p>
     </section>
     <div id="mine">${state.wallet.address ? `<p class="note">Loading indexed names for ${esc(shortAddr(state.wallet.address))}…</p>` : `<div class="empty">Connect a wallet to look up indexed names.</div>`}</div>
-    ${recent.length ? `<h2 style="margin-top:32px">Registered in this browser</h2><p class="note">Local reminder only. Not proof of ownership.</p><div class="list">${recent.map((row) => `<a href="/d/${esc(row.name)}" data-link="/d/${esc(row.name)}">${esc(row.name)}</a>`).join("")}</div>` : ""}`;
+    ${recent.length ? `<h2 class="block-title">Registered in this browser</h2><p class="note">Local reminder only. Not proof of ownership.</p><div class="list">${recent.map((row) => `<a href="/d/${esc(row.name)}" data-link>${esc(row.name)}</a>`).join("")}</div>` : ""}`;
+}
+
+function discoverView() {
+  setMeta("Discover .etn names — DOMAIN.etn", "Indexed Electroneum name catalog. Not availability and not a ranking.");
+  return `
+    <section class="hero left">
+      <p class="kicker">Indexed catalog</p>
+      <h1>Discover</h1>
+      <p class="lede">Recent names EAE has indexed. This is not live availability and not a popularity ranking. Search a name to read the chain.</p>
+      <form class="search" id="prefix-form" role="search">
+        <label class="sr-only" for="prefix">Prefix search indexed names</label>
+        <input id="prefix" name="prefix" placeholder="sat" autocomplete="off" spellcheck="false" />
+        <button class="btn" type="submit">Find indexed</button>
+      </form>
+    </section>
+    <div id="discover-results"><p class="note">Loading indexed names…</p></div>`;
+}
+
+function marketView() {
+  setMeta("Marketplace — DOMAIN.etn", "Secondary .etn marketplace settlement is not deployed on Electroneum.");
+  return `
+    <section class="hero left">
+      <p class="kicker">Secondary market</p>
+      <h1>Marketplace</h1>
+      <p class="lede">Fixed-price listings will settle on a DomainMarketplace contract when a human deployment gate enables it. That contract is not live on Electroneum today.</p>
+    </section>
+    <div class="card">
+      <div class="grid">
+        <div class="metric"><label>Settlement</label><b>Not deployed</b></div>
+        <div class="metric"><label>Buy now</label><b>Not implemented</b></div>
+        <div class="metric"><label>Offers</label><b>Not implemented</b></div>
+        <div class="metric"><label>Auctions</label><b>Not implemented</b></div>
+      </div>
+      <p class="note">DOMAIN.etn will not prepare listing or purchase transactions, will not invent inventory, and will not treat an indexed row as a name you can buy.</p>
+    </div>
+    <h2 class="block-title">Indexed listings</h2>
+    <div id="market-list"><p class="note">Checking EAE for observational listings…</p></div>`;
+}
+
+function ownerView(address) {
+  setMeta(`${shortAddr(address)} — DOMAIN.etn`, `Indexed .etn names associated with ${address}.`);
+  return `
+    <section class="hero left">
+      <p class="kicker">Address</p>
+      <h1 class="addr-title">${esc(shortAddr(address))}</h1>
+      <p class="lede">Indexed associations from EAE. Not a person, not a marketplace seller, not live ownership by itself. <a rel="noopener noreferrer" target="_blank" href="${explorerAddr(address)}">View on explorer</a></p>
+    </section>
+    <div id="owner-box"><p class="note">Loading indexed names…</p></div>`;
 }
 
 async function fillMine() {
@@ -633,11 +775,128 @@ async function fillMine() {
       return;
     }
     box.innerHTML = `<p class="note">Indexed by EAE. Not an ownership table.</p><div class="list">${rows
-      .map((row) => `<a href="/d/${esc(row.name)}" data-link="/d/${esc(row.name)}">${esc(row.name)}</a>`)
+      .map((row) => `<a href="/d/${esc(row.name)}" data-link>${esc(row.name)}</a>`)
       .join("")}</div>`;
-    box.querySelectorAll("[data-link]").forEach((a) => a.addEventListener("click", (ev) => { ev.preventDefault(); go(a.getAttribute("data-link")); }));
   } catch (err) {
-    box.innerHTML = `<div class="err">${esc(err.message)}</div>`;
+    box.innerHTML = `<div class="err" role="alert">${esc(err.message)}</div>`;
+  }
+}
+
+async function fillRelated() {
+  const box = document.getElementById("related-names");
+  const owner = state.profile && state.profile.owner;
+  if (!box || !owner) return;
+  try {
+    const data = await api.ownerDomains(owner);
+    const rows = (data.domains || []).filter((row) => row.name && row.name !== (state.profile && state.profile.name));
+    if (!rows.length) {
+      box.innerHTML = `<div class="empty">${data.authority === "not_queried" ? "EAE is not configured." : "No other indexed names for this owner."}</div>`;
+      return;
+    }
+    box.innerHTML = `<div class="list">${rows.map((row) => `<a href="/d/${esc(row.name)}" data-link>${esc(row.name)}</a>`).join("")}</div>`;
+  } catch (err) {
+    box.innerHTML = `<div class="err" role="alert">${esc(err.message)}</div>`;
+  }
+}
+
+async function fillDiscover() {
+  const box = document.getElementById("discover-results");
+  if (!box) return;
+  const form = document.getElementById("prefix-form");
+  if (form) {
+    form.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const prefix = (form.prefix.value || "").trim();
+      if (!prefix) return;
+      box.innerHTML = `<p class="note">Searching indexed catalog…</p>`;
+      try {
+        const data = await api.catalogSearch(prefix, prefix);
+        const rows = data.results || [];
+        if (!rows.length) {
+          box.innerHTML = `<div class="empty">${data.authority === "not_queried" ? "EAE is not configured, so there is no indexed catalog." : "No indexed names match that prefix."}</div>`;
+          return;
+        }
+        box.innerHTML = `<p class="note">Indexed matches. Open a name to read live chain state.</p><div class="list">${rows
+          .map((row) => {
+            const name = row.normalized_name || row.name || row;
+            return `<a href="/d/${esc(name)}" data-link>${esc(name)}</a>`;
+          })
+          .join("")}</div>`;
+      } catch (err) {
+        box.innerHTML = `<div class="err" role="alert">${esc(err.message)}</div>`;
+      }
+    });
+  }
+  try {
+    const data = await api.discovery();
+    const cats = data.categories || {};
+    const recent = cats.recently_registered || cats.recently_seen || data.eae && (data.eae.recent_registrations || data.eae.recent) || [];
+    if (data.authority === "not_queried") {
+      box.innerHTML = `<div class="empty">EAE is not configured. Discovery is indexed catalog data, not live availability. Search a name instead.</div>`;
+      return;
+    }
+    const sections = [
+      ["Recently registered", cats.recently_registered || recent],
+      ["Recently seen", cats.recently_seen || []],
+    ].filter(([, rows]) => Array.isArray(rows) && rows.length);
+    if (!sections.length) {
+      box.innerHTML = `<div class="empty">EAE has no indexed names to show yet.</div>`;
+      return;
+    }
+    box.innerHTML = sections
+      .map(
+        ([title, rows]) =>
+          `<h2 class="block-title">${esc(title)}</h2><div class="list">${rows
+            .map((row) => {
+              const name = row.normalized_name || row.name || row;
+              return `<a href="/d/${esc(name)}" data-link>${esc(name)}</a>`;
+            })
+            .join("")}</div>`
+      )
+      .join("");
+  } catch (err) {
+    box.innerHTML = `<div class="err" role="alert">${esc(err.message)}</div>`;
+  }
+}
+
+async function fillMarket() {
+  const box = document.getElementById("market-list");
+  if (!box) return;
+  try {
+    const data = await api.marketplaceListings();
+    const rows = data.listings || [];
+    if (!rows.length) {
+      box.innerHTML = `<div class="empty">${
+        data.authority === "not_queried"
+          ? "EAE is not configured, and no marketplace contract is deployed. There is nothing to buy here."
+          : "No indexed listings. Indexed rows would still not be purchasable here."
+      }</div>`;
+      return;
+    }
+    box.innerHTML = `<p class="note">Observational EAE rows. Not purchasable. Not live availability.</p><div class="list">${rows
+      .map((row) => {
+        const name = row.name || "unknown";
+        const price = row.price_wei ? formatEtn(row.price_wei) : "price not shown as live";
+        return `<div class="name-row"><a href="/d/${esc(name)}" data-link>${esc(name)}</a><span class="muted">${esc(price)} · not for sale here</span></div>`;
+      })
+      .join("")}</div>`;
+  } catch (err) {
+    box.innerHTML = `<div class="err" role="alert">${esc(err.message)}</div>`;
+  }
+}
+
+async function fillOwner(address) {
+  const box = document.getElementById("owner-box");
+  if (!box) return;
+  try {
+    const data = await api.owner(address);
+    const rows = data.domains || [];
+    const list = rows.length
+      ? `<div class="list">${rows.map((row) => `<a href="/d/${esc(row.name)}" data-link>${esc(row.name)}</a>`).join("")}</div>`
+      : `<div class="empty">${data.authority === "not_queried" ? "EAE is not configured." : "No indexed names for this address."}</div>`;
+    box.innerHTML = `<p class="note">${esc(data.note || "Indexed associations only.")}</p>${list}`;
+  } catch (err) {
+    box.innerHTML = `<div class="err" role="alert">${esc(err.message)}</div>`;
   }
 }
 
@@ -646,8 +905,13 @@ function render() {
   const r = route();
   if (r.view === "home") main.innerHTML = homeView();
   else if (r.view === "me") main.innerHTML = meView();
-  else if (state.phase === Phase.REGISTERED_SUCCESSFULLY) main.innerHTML = `<section class="domain-hero"><p class="kicker">Registered successfully</p><h1>${domainTitle(state.name)}</h1></section>${successCard()}`;
-  else if (state.available === false && state.profile) main.innerHTML = profileView();
+  else if (r.view === "discover") main.innerHTML = discoverView();
+  else if (r.view === "market") main.innerHTML = marketView();
+  else if (r.view === "owner") main.innerHTML = ownerView(r.address);
+  else if (state.phase === Phase.REGISTERED_SUCCESSFULLY) {
+    setMeta(`${state.name} registered — DOMAIN.etn`, `${state.name} was confirmed on Electroneum.`);
+    main.innerHTML = `<section class="domain-hero"><p class="kicker">Registered successfully</p><h1>${domainTitle(state.name)}</h1></section>${successCard()}`;
+  } else if (state.available === false && state.profile) main.innerHTML = profileView();
   else if (state.name) main.innerHTML = availableView();
   else main.innerHTML = homeView();
   bindSearch();
@@ -686,6 +950,10 @@ function render() {
   const payRenew = document.getElementById("pay-renew");
   if (payRenew) payRenew.addEventListener("click", signRenew);
   if (r.view === "me") fillMine();
+  if (r.view === "discover") fillDiscover();
+  if (r.view === "market") fillMarket();
+  if (r.view === "owner") fillOwner(r.address);
+  if (r.view === "domain" && state.profile && !state.available) fillRelated();
   announce(userCopy(state));
 }
 

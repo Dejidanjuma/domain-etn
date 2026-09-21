@@ -23,7 +23,8 @@ PYTHONPATH=. python3 -m src.domain_etn
 ```
 
 Defaults: `127.0.0.1:8081`. Copy `.env.example`. Set `DOMAIN_ETN_QUOTE_SECRET`
-in any durable process. Never put a wallet key in env.
+in any durable process. Never put a wallet key in env. Set
+`DOMAIN_ETN_EAE_URL` only if an EAE HTTP endpoint is available.
 
 Open `/` for search. Registration: availability → quote → commit → 60s wait
 → pay native ETN → backend confirms `NameRegistered`. Renewal is prepare-only
@@ -33,4 +34,7 @@ and charges `rentPrice.base`.
 
 Primary registration: user → official `ETHRegistrarController`.
 Renewal: user → official `ETHRegistrarController.renew`.
-Secondary marketplace: not implemented; different flow, do not mix.
+Intelligence: optional EAE HTTP reads. Not ownership.
+Secondary marketplace: **not deployed** on Electroneum; DOMAIN.etn does not
+prepare listing or purchase transactions. Offers and auctions are not
+implemented by the current marketplace contract.

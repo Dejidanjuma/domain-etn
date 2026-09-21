@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createState, reduce, Phase, isSuccess, canRegister, userCopy } from "../../web/js/flow.js";
 import { parseName } from "../../web/js/names.js";
-import { formatEtn, mmss } from "../../web/js/format.js";
+import { formatEtn, mmss, formatRelative } from "../../web/js/format.js";
+import { lifecycleOf, historyRows } from "../../web/js/lifecycle.js";
 
 test("empty search is invalid", () => {
   assert.equal(parseName("").ok, false);
@@ -88,4 +89,22 @@ test("confirmation failure is not success", () => {
 test("format helpers", () => {
   assert.equal(formatEtn("1000000000000000000"), "1 ETN");
   assert.equal(mmss(47), "00:47");
+});
+
+test("lifecycle labels", () => {
+  assert.equal(lifecycleOf({ available: true }).state, "available");
+  assert.equal(lifecycleOf({ available: false, in_grace: true }).state, "grace");
+  assert.equal(lifecycleOf({ lifecycle: { state: "expiring_soon", label: "Expiring soon" } }).className, "expiring");
+  assert.equal(historyRows({ intelligence: { history: [{ event_type: "NameRegistered" }] } }).length, 1);
+});
+
+test("relative expiry", () => {
+  const now = 1_700_000_000;
+  assert.match(formatRelative(now + 10 * 86400, now), /days/);
+});
+
+test("renewal is not registration success", () => {
+  let s = reduce(createState(), { type: "RENEWED", intent: { status: "confirmed" } });
+  assert.equal(s.phase, Phase.RENEWED);
+  assert.equal(isSuccess(s), false);
 });
