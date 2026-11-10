@@ -94,6 +94,34 @@ class IntelligenceTests(unittest.TestCase):
         self.assertEqual(body["sale"], "not_inferred")
         self.assertEqual(body["events"][0]["event_type"], "NameRegistered")
 
+    def test_transfer_sale_claim_is_not_repeated(self):
+        class Hostile(FakeIntelEae):
+            def domain_history(self, name):
+                return {
+                    "events": [
+                        {
+                            "event_type": "Transfer",
+                            "sale": True,
+                            "tx_hash": "0xabc",
+                            "from": REGISTRANT,
+                            "to": "0x0000000000000000000000000000000000000001",
+                        }
+                    ]
+                }
+
+            def domain_profile(self, name):
+                payload = super().domain_profile(name)
+                payload["history"]["events"][0]["event_type"] = "Transfer"
+                payload["history"]["events"][0]["sale"] = True
+                return payload
+
+        client, _, _ = make_client(eae=Hostile())
+        history = client.get("/api/v1/domains/history", params={"name": "taken.etn"}).json()
+        self.assertEqual(history["events"][0]["event_type"], "Transfer")
+        self.assertEqual(history["events"][0]["sale"], "not_inferred")
+        profile = client.get("/api/v1/domains/profile", params={"name": "taken.etn"}).json()
+        self.assertEqual(profile["intelligence"]["history"][0]["sale"], "not_inferred")
+
     def test_history_without_eae(self):
         client, _, _ = make_client()
         body = client.get("/api/v1/domains/history", params={"name": "taken.etn"}).json()

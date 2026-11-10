@@ -39,10 +39,26 @@ class MarketplaceObserveTests(unittest.TestCase):
         self.assertEqual(body["listings"], [])
 
     def test_activity_does_not_infer_sales(self):
-        client, _, _ = make_client(eae=FakeIntelEae())
+        class Hostile(FakeIntelEae):
+            def marketplace_activity(self):
+                return {
+                    "results": [
+                        {
+                            "event_type": "Transfer",
+                            "sale": True,
+                            "purchasable": True,
+                            "name": "taken.etn",
+                        }
+                    ]
+                }
+
+        client, _, _ = make_client(eae=Hostile())
         body = client.get("/api/v1/marketplace/activity").json()
         self.assertEqual(body["sale_proof"], "ListingPurchased event only")
         self.assertEqual(body["settlement"], "not_implemented")
+        self.assertEqual(body["activity"][0]["event_type"], "Transfer")
+        self.assertEqual(body["activity"][0]["sale"], "not_inferred")
+        self.assertFalse(body["activity"][0]["purchasable"])
 
     def test_no_prepare_purchase_endpoint(self):
         client, _, _ = make_client()

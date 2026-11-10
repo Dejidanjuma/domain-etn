@@ -141,7 +141,7 @@ def normalize_history(eae_payload: dict | None) -> list[dict]:
                 "entity": item.get("entity") or item.get("to") or item.get("from"),
                 "from": item.get("from"),
                 "to": item.get("to"),
-                "sale": item.get("sale") or "not_inferred",
+                "sale": "not_inferred",
                 "source": "eae_indexed_facts",
             }
         )

@@ -71,6 +71,14 @@ def activity(*, eae=None) -> dict:
     items = []
     if isinstance(raw, dict):
         items = raw.get("results") or raw.get("items") or []
+    cleaned = []
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, dict):
+            continue
+        row = dict(item)
+        row["sale"] = "not_inferred"
+        row["purchasable"] = False
+        cleaned.append(row)
     return {
         "type": "marketplace_activity",
         "flow": "secondary_marketplace",
@@ -79,7 +87,7 @@ def activity(*, eae=None) -> dict:
         "authority": authority,
         "not_authorization": True,
         "sale_proof": "ListingPurchased event only",
-        "activity": items if isinstance(items, list) else [],
+        "activity": cleaned,
         "eae": raw,
         "marketplace": NOT_IMPLEMENTED,
         "note": "Canonical marketplace events only, when EAE has indexed them. Transfer is not a sale.",
