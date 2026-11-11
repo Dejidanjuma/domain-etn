@@ -73,3 +73,7 @@ class UiTests(unittest.TestCase):
         res = client.get("/")
         self.assertEqual(res.headers.get("x-content-type-options"), "nosniff")
         self.assertEqual(res.headers.get("x-frame-options"), "DENY")
+        self.assertEqual(res.headers.get("referrer-policy"), "strict-origin-when-cross-origin")
+        self.assertEqual(res.headers.get("permissions-policy"), "camera=(), microphone=(), geolocation=()")
+        self.assertEqual(res.headers.get("cache-control"), "no-store")
+        self.assertNotIn("x-powered-by", res.headers)
