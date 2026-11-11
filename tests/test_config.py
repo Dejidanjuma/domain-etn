@@ -14,6 +14,14 @@ class QuoteSecretConfigurationTests(unittest.TestCase):
         with patch.dict(os.environ, {"DOMAIN_ETN_HOST": "127.0.0.1"}, clear=True):
             self.assertEqual(len(Settings().quote_secret), 32)
 
+    def test_explicit_local_container_mode_keeps_development_fallback(self):
+        with patch.dict(
+            os.environ,
+            {"DOMAIN_ETN_ENV": "development", "DOMAIN_ETN_HOST": "0.0.0.0"},
+            clear=True,
+        ):
+            self.assertEqual(len(Settings().quote_secret), 32)
+
     def test_production_requires_explicit_quote_secret(self):
         with patch.dict(
             os.environ,
