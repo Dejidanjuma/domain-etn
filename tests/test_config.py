@@ -10,8 +10,8 @@ from src.domain_etn.config import Settings
 
 
 class QuoteSecretConfigurationTests(unittest.TestCase):
-    def test_local_development_keeps_ephemeral_secret_fallback(self):
-        with patch.dict(os.environ, {"DOMAIN_ETN_HOST": "127.0.0.1"}, clear=True):
+    def test_default_loopback_development_keeps_ephemeral_secret_fallback(self):
+        with patch.dict(os.environ, {}, clear=True):
             self.assertEqual(len(Settings().quote_secret), 32)
 
     def test_explicit_local_container_mode_keeps_development_fallback(self):
@@ -28,6 +28,11 @@ class QuoteSecretConfigurationTests(unittest.TestCase):
             {"DOMAIN_ETN_ENV": "production", "DOMAIN_ETN_HOST": "127.0.0.1"},
             clear=True,
         ):
+            with self.assertRaisesRegex(RuntimeError, "DOMAIN_ETN_QUOTE_SECRET"):
+                Settings()
+
+    def test_explicit_host_binding_requires_secret_even_behind_loopback_proxy(self):
+        with patch.dict(os.environ, {"DOMAIN_ETN_HOST": "127.0.0.1"}, clear=True):
             with self.assertRaisesRegex(RuntimeError, "DOMAIN_ETN_QUOTE_SECRET"):
                 Settings()
 
