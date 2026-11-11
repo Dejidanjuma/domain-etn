@@ -37,7 +37,8 @@ class Settings:
             for name in ("RENDER", "RENDER_SERVICE_ID", "VERCEL", "RAILWAY_ENVIRONMENT", "FLY_APP_NAME")
         )
         non_loopback_bind = self.host not in {"127.0.0.1", "localhost", "::1"}
-        production = deployment_env == "production" or hosted_runtime or non_loopback_bind
+        explicit_local_mode = deployment_env in {"development", "test", "local"}
+        production = hosted_runtime or deployment_env == "production" or (non_loopback_bind and not explicit_local_mode)
         if not secret and production:
             raise RuntimeError(
                 "DOMAIN_ETN_QUOTE_SECRET must be configured in hosted/production environments"
