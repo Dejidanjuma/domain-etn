@@ -31,6 +31,17 @@ class Settings:
             or "https://rpc.ankr.com/electroneum"
         )
         secret = os.getenv("DOMAIN_ETN_QUOTE_SECRET", "").strip()
+        deployment_env = os.getenv("DOMAIN_ETN_ENV", "").strip().lower()
+        hosted_runtime = any(
+            os.getenv(name, "").strip()
+            for name in ("RENDER", "RENDER_SERVICE_ID", "VERCEL", "RAILWAY_ENVIRONMENT", "FLY_APP_NAME")
+        )
+        non_loopback_bind = self.host not in {"127.0.0.1", "localhost", "::1"}
+        production = deployment_env == "production" or hosted_runtime or non_loopback_bind
+        if not secret and production:
+            raise RuntimeError(
+                "DOMAIN_ETN_QUOTE_SECRET must be configured in hosted/production environments"
+            )
         self.quote_secret = secret.encode() if secret else secrets.token_bytes(32)
         eae = os.getenv("DOMAIN_ETN_EAE_URL", "").strip().rstrip("/")
         self.eae_url = eae or None
